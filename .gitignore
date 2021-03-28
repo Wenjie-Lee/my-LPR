@@ -129,8 +129,8 @@ dmypy.json
 .pyre/
 
 # 2021/3/28 add files should be ignored
-.jpg
-.png
-.xml
-.zip
-.7z
+*.jpg
+*.png
+*.xml
+*.zip
+*.7z
