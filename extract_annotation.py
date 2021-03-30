@@ -271,8 +271,7 @@ def copy_annotations(srcpath, annotation_src='./annotations', number=0):
     random.shuffle(files)
 
     i = 1
-    train_split = 0.8
-    val_split = 0.1
+    train_split = 0.9
 
     # number==0, 表示全部输出
     if number == 0 or number >= length:
@@ -285,8 +284,6 @@ def copy_annotations(srcpath, annotation_src='./annotations', number=0):
             dst = annotation_src
             if i <= number * train_split:
                 dst = os.path.join(annotation_src, 'train')
-            elif i <= number * (train_split + val_split):
-                dst = os.path.join(annotation_src, 'val')
             else:
                 dst = os.path.join(annotation_src, 'test')
 
@@ -298,6 +295,20 @@ def copy_annotations(srcpath, annotation_src='./annotations', number=0):
             if i > number:
                 break
     print('move complete...')
+
+# collect the training annotation file list
+def collect_annotations(anno_src='./annotations', dir='train'):
+    with open(os.path.join(anno_src, '{}.txt'.format(dir)), 'w') as f:
+        print('Writing training annotation file paths...')
+        path = os.path.join(anno_src, dir)
+        annos = os.listdir(path)
+        for a in annos:
+            if a.endswith('.xml'):
+                f.write('{}\n'.format(os.path.join(path, a)))
+        print('Collecting complete...')
+        pass
+    print('Cannot open or create txt file.')
+    pass
 
 def _main():
     _walk_folder(ccpd_base_dir)
@@ -314,14 +325,14 @@ def _main():
 if __name__ == '__main__':
     # _main()
     # _crop('./ccpd_base', threshold=0.9)
-    #rename_with_annotation(ccpd_base_dir, number=0)
-    #rename_with_annotation(ccpd_blur_dir, number=0)
-    #rename_with_annotation(ccpd_weather_dir, number=0)
-    #rename_with_annotation(ccpd_rotate_dir, number=0)
-    #rename_with_annotation(ccpd_tilt_dir, number=0)
-    #rename_with_annotation(ccpd_challenge_dir, number=0)
-    #rename_with_annotation(ccpd_db_dir, number=0)
-    #rename_with_annotation(ccpd_fn_dir, number=0)
+    # rename_with_annotation(ccpd_base_dir, number=0)
+    # rename_with_annotation(ccpd_blur_dir, number=0)
+    # rename_with_annotation(ccpd_weather_dir, number=0)
+    # rename_with_annotation(ccpd_rotate_dir, number=0)
+    # rename_with_annotation(ccpd_tilt_dir, number=0)
+    # rename_with_annotation(ccpd_challenge_dir, number=0)
+    # rename_with_annotation(ccpd_db_dir, number=0)
+    # rename_with_annotation(ccpd_fn_dir, number=0)
     # rename_with_annotation('./ccpd_green/', number=0)
     # rename_bwy_annotations('./ccpd_bp/')
     # rename_bwy_annotations('./ccpd_wp/')
@@ -331,3 +342,6 @@ if __name__ == '__main__':
     # copy_annotations('./annotations/ccpd_bp/', number=0)
     # copy_annotations('./annotations/ccpd_base/', number=1000)
     # copy_annotations('./annotations/ccpd_green/', number=500)
+
+    # collect_annotations(dir='train')
+    # collect_annotations(dir='test')

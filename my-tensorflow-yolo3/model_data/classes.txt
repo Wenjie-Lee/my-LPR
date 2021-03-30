@@ -1,5 +1,5 @@
-蓝牌
-黄牌
-黑牌
-白牌
-新能源车牌
+blue
+yellow
+black
+white
+green
