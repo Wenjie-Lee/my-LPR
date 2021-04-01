@@ -52,6 +52,7 @@ ccpd_tilt_dir = './ccpd_tilt/'
 ccpd_weather_dir = './ccpd_weather/'
 ccpd_blur_dir = './ccpd_blur/'
 ccpd_challenge_dir = './ccpd_challenge/'
+ccpd_np_dir = './ccpd_np/'
 
 # 获取 fields list
 def _split(name):
@@ -101,9 +102,43 @@ def _crop(srcpath, threshold=0.9):
     pass
 
 
+# 
+def _expand(srcpath):
+    from PIL import Image, ImageOps
+    image = Image.open(srcpath)
+    iw, ih = image.size
+    if iw < 704 or ih < 704:
+        padding = (0, 0, 704 - iw, 704 - ih)
+        image = ImageOps.expand(image, padding)
+    image.convert('RGB').save(srcpath)
+    return iw, ih
+
+
+# elemnt为传进来的Elment类，参数indent用于缩进，newline用于换行   
+def prettyXml(element, indent, newline, level = 0): 
+    # 判断element是否有子元素
+    if element:
+        # 如果element的text没有内容      
+        if element.text == None or element.text.isspace():     
+            element.text = newline + indent * (level + 1)      
+        else:    
+            element.text = newline + indent * (level + 1) + element.text.strip() + newline + indent * (level + 1)    
+    # 此处两行如果把注释去掉，Element的text也会另起一行 
+    #else:     
+        #element.text = newline + indent * (level + 1) + element.text.strip() + newline + indent * level    
+    temp = list(element) # 将elemnt转成list    
+    for subelement in temp:    
+        # 如果不是list的最后一个元素，说明下一个行是同级别元素的起始，缩进应一致
+        if temp.index(subelement) < (len(temp) - 1):     
+            subelement.tail = newline + indent * (level + 1)    
+        else:  # 如果是list的最后一个元素， 说明下一行是母元素的结束，缩进应该少一个    
+            subelement.tail = newline + indent * level   
+        # 对子元素进行递归操作 
+        prettyXml(subelement, indent, newline, level = level + 1)
+
+
 # 按annotation文件格式，将图像名改为xml文件
 def rename_with_annotation(srcpath, annotation_src='./annotations', cls='blue', number=0):
-    from PIL import Image
 
     print('输出annotation文件...')
     files = os.listdir(srcpath)
@@ -125,12 +160,7 @@ def rename_with_annotation(srcpath, annotation_src='./annotations', cls='blue', 
         if file.endswith('jpg'):
             # 裁剪或补足图片大小
             path = os.path.join(srcpath, file)
-            image = Image.open(path)
-            iw, ih = image.size
-            if iw < 704 or ih < 704:
-                padding = (0, 0, 704 - iw, 704 - ih)
-                image = image.expand(image, padding)
-            image.save(path)
+            iw, ih = _expand(path)
             # 解析文件名
             # 025-95_113-154&383_386&473-386&473_177&454_154&383_363&402-0_0_22_27_27_33_16-37-15.jpg
             # 标定框的左上角、右下角坐标：(154,383), (386,473)
@@ -144,10 +174,7 @@ def rename_with_annotation(srcpath, annotation_src='./annotations', cls='blue', 
             # os.rename(path, newpath)
 
             # 构造xml
-            from xml.etree.ElementTree import Element
-            from xml.etree.ElementTree import SubElement
-            from xml.etree.ElementTree import ElementTree
-
+            from xml.etree.ElementTree import Element,SubElement,ElementTree
             from xml.dom import minidom
 
             anno = Element('annotation')
@@ -196,27 +223,7 @@ def rename_with_annotation(srcpath, annotation_src='./annotations', cls='blue', 
             _ymax = SubElement(bndbox, 'ymax')
             _ymax.text = ymax
 
-            # elemnt为传进来的Elment类，参数indent用于缩进，newline用于换行   
-            def prettyXml(element, indent, newline, level = 0): 
-                # 判断element是否有子元素
-                if element:
-                    # 如果element的text没有内容      
-                    if element.text == None or element.text.isspace():     
-                        element.text = newline + indent * (level + 1)      
-                    else:    
-                        element.text = newline + indent * (level + 1) + element.text.strip() + newline + indent * (level + 1)    
-                # 此处两行如果把注释去掉，Element的text也会另起一行 
-                #else:     
-                    #element.text = newline + indent * (level + 1) + element.text.strip() + newline + indent * level    
-                temp = list(element) # 将elemnt转成list    
-                for subelement in temp:    
-                    # 如果不是list的最后一个元素，说明下一个行是同级别元素的起始，缩进应一致
-                    if temp.index(subelement) < (len(temp) - 1):     
-                        subelement.tail = newline + indent * (level + 1)    
-                    else:  # 如果是list的最后一个元素， 说明下一行是母元素的结束，缩进应该少一个    
-                        subelement.tail = newline + indent * level   
-                    # 对子元素进行递归操作 
-                    prettyXml(subelement, indent, newline, level = level + 1)   
+               
 
             prettyXml(anno, '\t', '\n')
             anno_name = 'anno_' + folderpath + '_' + _filename + '.xml'
@@ -239,27 +246,43 @@ def rename_with_annotation(srcpath, annotation_src='./annotations', cls='blue', 
 
 
 # 重命名黑白黄车牌的annotation文件
-def rename_bwy_annotations(srcpath):
-    from xml.etree.ElementTree import ElementTree
+def change_bwy_annotations(srcpath, imgsrc):
+    from xml.etree.ElementTree import Element,SubElement,ElementTree
     from xml.dom.minidom import parse
     import xml.dom.minidom
 
     files = os.listdir(srcpath)
     for file in files:
         if file.endswith('.xml'):
+            # process the image
+            imgname = file.split('_')[-1].split('.')[0]
+            # print(imgname)
+            imgpath = os.path.join(imgsrc, imgname+'.jpg')
+            # print(imgpath)
+            iw, ih = _expand(imgpath)
             # 解析xml文件
             path = os.path.join(srcpath, file)
             tree = ElementTree()
             tree.parse(path)
             root = tree.getroot()
+            size = root.find('size')
+            width = size.find('width')
+            width.text  = str(iw)
+            height = size.find('height')
+            height.text  = str(ih)
+            depth = size.find('depth')
+            depth.text  = '3'
 
             folder = srcpath.split('/')[-2]
             foldertab = root.find('folder')
             foldertab.text = folder
             pathtab = root.find('path')
-            pathtab.text = path
-            save_name = 'anno_' + folder + '_' + file.split('.')[0] + '.xml'
-            tree.write(os.path.join(srcpath, save_name), encoding='utf-8')
+            # annotation path is image path
+            pathtab.text = imgpath
+            print(pathtab.text)
+            # save_name = 'anno_' + folder + '_' + file.split('.')[0] + '.xml'
+            # tree.write(os.path.join(srcpath, save_name), encoding='utf-8')
+            tree.write(os.path.join(srcpath, file), encoding='utf-8')
     
 
 # 移动annotation文件到指定文件夹
@@ -297,8 +320,8 @@ def copy_annotations(srcpath, annotation_src='./annotations', number=0):
     print('move complete...')
 
 # collect the training annotation file list
-def collect_annotations(anno_src='./annotations', dir='train'):
-    with open(os.path.join(anno_src, '{}.txt'.format(dir)), 'w') as f:
+def collect_anno_paths (anno_src='./annotations', dir='train_anno'):
+    with open(os.path.join(anno_src, '{}{}.txt'.format(dir, '_anno')), 'w') as f:
         print('Writing training annotation file paths...')
         path = os.path.join(anno_src, dir)
         annos = os.listdir(path)
@@ -306,8 +329,6 @@ def collect_annotations(anno_src='./annotations', dir='train'):
             if a.endswith('.xml'):
                 f.write('{}\n'.format(os.path.join(path, a)))
         print('Collecting complete...')
-        pass
-    print('Cannot open or create txt file.')
     pass
 
 def _main():
@@ -334,14 +355,103 @@ if __name__ == '__main__':
     # rename_with_annotation(ccpd_db_dir, number=0)
     # rename_with_annotation(ccpd_fn_dir, number=0)
     # rename_with_annotation('./ccpd_green/', number=0)
-    # rename_bwy_annotations('./ccpd_bp/')
-    # rename_bwy_annotations('./ccpd_wp/')
-    # rename_bwy_annotations('./ccpd_yp/')
-    # copy_annotations('./annotations/ccpd_yp/', number=0)
-    # copy_annotations('./annotations/ccpd_wp/', number=0)
-    # copy_annotations('./annotations/ccpd_bp/', number=0)
-    # copy_annotations('./annotations/ccpd_base/', number=1000)
-    # copy_annotations('./annotations/ccpd_green/', number=500)
 
-    # collect_annotations(dir='train')
-    # collect_annotations(dir='test')
+
+    # change_bwy_annotations('./ccpd_bp/')
+    # change_bwy_annotations('./ccpd_wp/')
+    # change_bwy_annotations('./ccpd_yp/')
+    # change_bwy_annotations('./ccpd_np/')
+
+
+    # change path from '.xml' end to '.jpg' end in annos
+    # change_bwy_annotations('./annotations/ccpd_bp/', imgsrc='./ccpd_bp/')
+    # change_bwy_annotations('./annotations/ccpd_wp/', imgsrc='./ccpd_wp/')
+    # change_bwy_annotations('./annotations/ccpd_yp/', imgsrc='./ccpd_yp/')
+    # change_bwy_annotations('./annotations/ccpd_np/', imgsrc='./ccpd_np/')
+
+
+    copy_annotations('./annotations/ccpd_yp/', number=0)
+    copy_annotations('./annotations/ccpd_wp/', number=0)
+    copy_annotations('./annotations/ccpd_bp/', number=0)
+    copy_annotations('./annotations/ccpd_base/', number=1000)
+    copy_annotations('./annotations/ccpd_green/', number=500)
+    copy_annotations('./annotations/ccpd_np/', number=200)
+
+
+    collect_anno_paths (dir='train')
+    collect_anno_paths (dir='test')
+
+
+# create annotations for ccpd_np
+# def none_plate_annotation(srcpath=ccpd_np_dir, annotation_src='./annotations', number=0):
+#     from PIL import Image
+
+#     print('output annotations for ccpd_np...')
+#     files = os.listdir(srcpath)
+#     folderpath = srcpath.split('/')[-2]
+#     dst = os.path.join(annotation_src, folderpath)
+#     if not os.path.isdir(dst):
+#         os.mkdir(dst)
+
+#     i = 1
+#     length = len(files)
+#     # 输出annotation的个数
+#     import random
+#     random.shuffle(files)
+#     # number==0, 表示全部输出
+#     if number == 0 or number > length:
+#         number = length
+
+#     for f in files:
+#         if f.endswith('.jpg'):
+#             path = os.path.join(srcpath, f)
+#             # 构造xml
+#             from xml.etree.ElementTree import Element
+#             from xml.etree.ElementTree import SubElement
+#             from xml.etree.ElementTree import ElementTree
+
+#             image = Image.open(path)
+#             iw, ih = image.size
+#             if iw < 704 or ih < 704:
+#                 padding = (0, 0, 704 - iw, 704 - ih)
+#                 image = image.expand(image, padding)
+#             image.save(path)
+
+#             anno = Element('annotation')
+
+#             folder = SubElement(anno, 'folder')
+#             folder.text = folderpath
+#             filename = SubElement(anno, 'filename')
+#             _filename = f.split('.')[0]
+#             filename.text = _filename
+
+#             filepath = SubElement(anno, 'path')
+#             filepath.text = path
+
+#             source = SubElement(anno, 'source')
+#             database = SubElement(source, 'database')
+#             database.text = 'Unknown'
+
+#             size = SubElement(anno, 'size')
+#             width = SubElement(size, 'width')
+#             width.text  = str(iw)
+#             height = SubElement(size, 'height')
+#             height.text  = str(ih)
+#             depth = SubElement(size, 'depth')
+#             depth.text  = '3'
+
+#             segmented = SubElement(anno, 'segmented')
+#             segmented.text = '0'
+
+#             prettyXml(anno, '\t', '\n')
+#             anno_name = 'anno_' + folderpath + '_' + _filename + '.xml'
+
+#             save_path = os.path.join(dst, anno_name)
+#             tree = ElementTree(anno)
+#             tree.write(save_path, encoding='utf-8')
+            
+#             i += 1
+#             # 取够数量就退出
+#             if i > number:
+#                 break
+    pass

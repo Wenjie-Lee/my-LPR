@@ -66,7 +66,7 @@ def get_random_data(annotation_line, input_shape, random=True, max_boxes=20, jit
     Parameters
     --------------------------------------------
 
-    annotation_line:        图片标注信息
+    annotation_line:        图片标注文件path
     input_shape:            模型输入大小
     random:                 是否要做随机数据增强，增强方式和下面几个参数有关
     max_boxes:              一张图片上真实框数量上限
@@ -84,10 +84,34 @@ def get_random_data(annotation_line, input_shape, random=True, max_boxes=20, jit
 
     '''
     line = annotation_line.split()
+    # print(line)
+    # from xml.etree.ElementTree import ElementTree
+    # from xml.dom.minidom import parse
+    # tree = ElementTree()
+    # tree.parse(annotation_line)
+    # root = tree.getroot()
+    # img_path = root.find('path').text
+
+
     image = Image.open(line[0])
     iw, ih = image.size
     h, w = input_shape
+
     box = np.array([np.array(list(map(int,box.split(',')))) for box in line[1:]])
+    # create a dict for mapping the class_names and num_classes
+    # idx_cls = dict(zip(class_names, range(num_classes)))
+    # print(idx_cls)
+    # box = []
+    # for obj in root.findall('object'):
+    #     cls_id = idx_cls[obj.find('name').text]
+    #     bbox = obj.find('bndbox')
+    #     xmin = int(bbox.find('xmin').text)
+    #     ymin = int(bbox.find('ymin').text)
+    #     xmax = int(bbox.find('xmax').text)
+    #     ymax = int(bbox.find('ymax').text)
+    #     print([xmin,ymin,xmax,ymax,cls_id])
+    #     box.append(list(map(int, [xmin,ymin,xmax,ymax,cls_id])))
+    # box = np.array(box)
 
     # 不做随机数据增强
     if not random:
@@ -177,5 +201,17 @@ def get_random_data(annotation_line, input_shape, random=True, max_boxes=20, jit
         box = box[np.logical_and(box_w>1, box_h>1)] # discard invalid box
         if len(box)>max_boxes: box = box[:max_boxes]
         box_data[:len(box)] = box
-
+        
+    # print(image_data.shape, box_data.shape)
     return image_data, box_data
+
+
+    
+
+
+# if __name__ == '__main__':
+
+#     # test
+#     with open('./annotations/test.txt') as f:
+#         lines = f.readlines()
+#     get_random_data(annotation_line=lines[0], input_shape=(704,704))

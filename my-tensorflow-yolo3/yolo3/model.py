@@ -6,12 +6,12 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras import backend as K
 from tensorflow.keras.layers import Conv2D, Add, ZeroPadding2D, UpSampling2D, Concatenate, MaxPooling2D
-from tensorflow.keras.layers.advanced_activations import LeakyReLU
-from tensorflow.keras.layers.normalization import BatchNormalization
+from tensorflow.keras.layers import LeakyReLU
+from tensorflow.keras.layers import BatchNormalization
 from tensorflow.keras.models import Model
 from tensorflow.keras.regularizers import l2
 
-from util import compose
+from yolo3.utils import compose
 
 
 
@@ -50,7 +50,7 @@ def resunit_body(x, num_filters, num_units):
         y = compose(
             DarknetConv2D_BN_Leaky(num_filters//2, (1,1)),
             DarknetConv2D_BN_Leaky(num_filters, (3,3)))(x)
-        x = Add()[x, y]
+        x = Add()([x, y])
     return x
 
 
@@ -59,7 +59,7 @@ def darknet_body(x):
         layers: 3 + 
     """
 
-    x = DarknetConv2D_BN_Leaky(x, (3,3))(x)
+    x = DarknetConv2D_BN_Leaky(32, (3,3))(x)
     x = resunit_body(x, 64, 1)
     x = resunit_body(x, 128, 2)
     x = resunit_body(x, 256, 8)
@@ -101,7 +101,7 @@ def yolo_body(inputs, num_anchors, num_classes):
         )(x)
     # Concatenate 1
     # print the darknet body layers to find this 152 layer
-    x = Concatenate()[x, darknet.layers[152].output]
+    x = Concatenate()([x, darknet.layers[152].output])
 
     x, y1 = last_block(x, 256, num_anchors*(5+num_classes))
 
@@ -111,7 +111,7 @@ def yolo_body(inputs, num_anchors, num_classes):
         )(x)
     # Concatenate 2
     # print the darknet body layers to find this 92 layer
-    x = Concatenate()[x, darknet.layers[92].output]
+    x = Concatenate()([x, darknet.layers[92].output])
 
     x, y2 = last_block(x, 128, num_anchors*(5+num_classes))
 
@@ -143,7 +143,7 @@ def yolo_head(features, anchors, num_classes, input_shape, calc_loss=False):
     # features` shape [x, y, h, w, confi, num of classes]
     num_anchors = len(anchors)
     # Reshape to [N, H, W, num_anchors, box_param]
-    anchors_tensor = K.reshape(K.constant(anchors), shape=[1, num_anchors, 1, 1, 2])
+    anchors_tensor = K.reshape(K.constant(anchors), shape=[1, 1, 1, num_anchors, 2])
 
     # build the grid panel
     grid_shape = K.shape(features)[1:3] # height and weight for [N, H, W, C] 
@@ -205,7 +205,7 @@ def yolo_correct_box(box_xy, box_wh, input_shape, image_shape):
     Returns
     --------------------------------------------
 
-    boxes:              基于原图坐标系的左下、右上角坐标，为实际像素值，非比值
+    boxes:              基于原图坐标系的lefttop、rightbottom坐标，为实际像素值，非比值
 
     """
 
@@ -225,12 +225,12 @@ def yolo_correct_box(box_xy, box_wh, input_shape, image_shape):
     # calc endpoints 
     box_mins = box_yx - box_hw / 2.
     box_maxes = box_yx + box_hw / 2.
-    boxes = K.concatenate(
-        box_mins[..., 1:2]  # x_mins
-        box_mins[..., 0:1]  # y_mins
-        box_maxes[..., 1:2] # x_maxes
-        box_maxes[..., 0:1] # y_maxes
-        )
+    boxes = K.concatenate([
+        box_mins[..., 0:1],  # y_mins
+        box_mins[..., 1:2],  # x_mins
+        box_maxes[..., 0:1], # y_maxes
+        box_maxes[..., 1:2], # x_maxes
+    ])
 
     # convert to real pixel values
     boxes *= K.concatenate([image_shape, image_shape])
@@ -255,17 +255,20 @@ def yolo_boxes_and_scores(features, anchors, num_classes, input_shape, image_sha
     Returns
     --------------------------------------------
 
-    boxes:              基于原图坐标系的左下、右上角坐标，为实际像素值，非比值
+    boxes:              基于原图坐标系的lefttop、rightbottom坐标，为实际像素值，非比值
     box_scores:         候选框的scores
 
     """
 
-    box_xy, box_wh, box_confidence, box_cls = yolo_head(features, 
+    box_xy, box_wh, box_confidence, box_cls_probs = yolo_head(features, 
         anchors, num_classes, input_shape)
+    
+    # yolo.py draw rectangle
+    # order: ymin, xmin, ymax, xmax
     boxes = yolo_correct_box(box_xy, box_wh, input_shape, image_shape)
     # 将后四位坐标合并到一个维度内
     boxes = K.reshape(boxes, [-1, 4])
-    box_scores = box_confidence * box_cls
+    box_scores = box_confidence * box_cls_probs
     box_scores = K.reshape(boxes_scores, [-1, num_classes])
 
     return boxes, box_scores
@@ -365,10 +368,8 @@ def box_iou(b1, b2):
     """
 
     b1 = K.expand_dims(b1, -2)
-    b1_xy = b1[..., :1]
-    b1_hw = b1[..., 2:4]
-    # w ~ x, h ~ y
-    b1_wh = b1_hw[::-1]
+    b1_xy = b1[..., :2]
+    b1_wh = b1[..., 2:4]
     b1_wh_half = b1_wh / 2.
     b1_mins = b1_xy - b1_wh_half
     b1_maxs = b1_xy + b1_wh_half
@@ -392,14 +393,14 @@ def box_iou(b1, b2):
 
 
 
-def yolo_loss(yolo_outputs, anchors, num_classes, iou_threshold=.5, print_loss=False):
+def yolo_loss(args, anchors, num_classes, iou_threshold=.5, print_loss=False):
     """
     Calculate yolo loss
 
     Parameters
     --------------------------------------------
 
-    yolo_outputs:       yolo_body 的输出
+    args:               yolo_body 的输出
     anchors:            锚框
     num_classes:        类别数量
     iou_threshold:      iou阈值，大于阈值的框的置信度标为-1，不计入loss计算过程
@@ -411,11 +412,13 @@ def yolo_loss(yolo_outputs, anchors, num_classes, iou_threshold=.5, print_loss=F
 
     """
 
-    num_layers = len(anchors) // 2
-    preds = yolo_outputs[:num_layers]
-    y_true = yolo_outputs[num_layers:]
+    num_layers = len(anchors) // 3
+    yolo_outputs = args[:num_layers]
+    y_true = args[num_layers:]
+    # print('anchors: {}'.format(anchors))
+    # print('args shape: {}'.format(args))
 
-    anchor_mask = [[6,7,8], [3,4,5], [0,1,2]] if num_layers==3 else [[3,4,5], [1,2,3]]
+    anchor_mask = [[6,7,8], [3,4,5], [0,1,2]] if num_layers==3 else [[3,4,5], [0,1,2]]
     input_shape = K.cast(K.shape(yolo_outputs[0])[1:3] * 32, K.dtype(y_true[0]))
     grid_shapes = [K.cast(K.shape(yolo_outputs[l])[1:3], K.dtype(y_true[0])) for l in range(num_layers)]
 
@@ -427,20 +430,20 @@ def yolo_loss(yolo_outputs, anchors, num_classes, iou_threshold=.5, print_loss=F
 
     for l in range(num_layers):
         object_mask = y_true[l][..., 4:5]   # box_confidence
-        true_cls = y_true[l][..., 5:]
+        true_cls_probs = y_true[l][..., 5:]
 
         grid, raw_pred, pred_xy, pred_wh = yolo_head(yolo_outputs[l], 
             anchors[anchor_mask[l]], num_classes, input_shape, calc_loss=True)
         pred_box = K.concatenate([pred_xy, pred_wh])
 
-
+        # print('raw_pred shape: {}'.format(raw_pred.shape))
         # 
-        raw_true_xy = y_true[l][..., :2]*grid_shape[l][::-1] - grid
+        raw_true_xy = y_true[l][..., :2]*grid_shapes[l][::-1] - grid
         raw_true_wh = K.log(y_true[l][..., 2:4] / anchors[anchor_mask[l]] * input_shape[::-1])
         raw_true_wh = K.switch(object_mask, raw_true_wh, K.zeros_like(raw_true_wh))
         # scale 作加权参数，调节不同尺寸的真实框对loss的贡献
         box_loss_scale = 2.0 - y_true[l][..., 2:3] * y_true[l][..., 3:4]
-
+ 
         # 
         ignore_mask = tf.TensorArray(K.dtype(y_true[0]), size=1, dynamic_size=True)
         object_mask_bool = K.cast(object_mask, 'bool')
@@ -449,7 +452,7 @@ def yolo_loss(yolo_outputs, anchors, num_classes, iou_threshold=.5, print_loss=F
             true_box = tf.boolean_mask(y_true[l][b,..., 0:4], object_mask_bool[b,..., 0])
             iou = box_iou(pred_box[b], true_box)
             best_iou = K.max(iou, axis=-1)
-            ignore_mask = ignore_mask.write(b, K.cast(best_iou < iou_threshold), K.dtype(true_box))
+            ignore_mask = ignore_mask.write(b, K.cast(best_iou < iou_threshold, K.dtype(true_box)))
             return b+1, ignore_mask
 
         # Reference: https://tensorflow.google.cn/api_docs/python/tf/while_loop
@@ -461,13 +464,14 @@ def yolo_loss(yolo_outputs, anchors, num_classes, iou_threshold=.5, print_loss=F
         ignore_mask = K.expand_dims(ignore_mask, -1)
 
         # x y loss
+        # print(raw_true_xy, raw_pred[0:2])
         xy_loss = object_mask * box_loss_scale * K.binary_crossentropy(raw_true_xy, 
             raw_pred[..., 0:2], from_logits=True)
         # w h loss
         wh_loss = object_mask * box_loss_scale * .5 * K.square(raw_true_wh - raw_pred[..., 2:4])
         confidence_loss = object_mask * K.binary_crossentropy(object_mask, raw_pred[..., 4:5], from_logits=True) + \
                     (1 - object_mask) * K.binary_crossentropy(object_mask, raw_pred[..., 4:5], from_logits=True) * ignore_mask
-        class_loss = object_mask * K.binary_crossentropy(true_cls, raw_pred[..., 5:], from_logits=True)
+        class_loss = object_mask * K.binary_crossentropy(true_cls_probs, raw_pred[..., 5:], from_logits=True)
 
         xy_loss = K.sum(xy_loss) / mf
         wh_loss = K.sum(wh_loss) / mf
@@ -514,9 +518,14 @@ def preprocess_true_boxes(true_boxes, input_shape, anchors, num_classes):
     true_boxes[..., 0:2] = boxes_xy / input_shape[::-1]
     true_boxes[..., 2:4] = boxes_wh / input_shape[::-1]
 
+    # print('true_boxes: {}'.format(true_boxes))
+    # print('anchors: {},{}'.format(anchors.dtype, anchors))
+
     m = true_boxes.shape[0]
     grid_shapes = [input_shape//{0:32, 1:16, 2:8}[l] for l in range(num_layers)]
-    y_true = [np.zeros((m, grid_shapes[l][0], grid_shapes[l][1], len(anchor_mask[l]), 5 + num_classes), 
+    # numpy 1.19 numpy.float32 cannot be interpreted as an integer
+    # we need to manually convert them.
+    y_true = [np.zeros((m, int(grid_shapes[l][0]), int(grid_shapes[l][1]), len(anchor_mask[l]), 5 + num_classes), 
         dtype='float32') for l in range(num_layers)]
 
     # 
