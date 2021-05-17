@@ -136,3 +136,5 @@ dmypy.json
 *.7z
 
 *.v2
+
+.idea/

@@ -269,7 +269,7 @@ def yolo_boxes_and_scores(features, anchors, num_classes, input_shape, image_sha
     # 将后四位坐标合并到一个维度内
     boxes = K.reshape(boxes, [-1, 4])
     box_scores = box_confidence * box_cls_probs
-    box_scores = K.reshape(boxes_scores, [-1, num_classes])
+    box_scores = K.reshape(box_scores, [-1, num_classes])
 
     return boxes, box_scores
 
@@ -313,9 +313,9 @@ def yolo_eval(yolo_outputs, anchors, num_classes, image_shape,
         _boxes, _box_scores = yolo_boxes_and_scores(yolo_outputs[l],
             anchors[anchor_mask[l], num_classes, input_shape, image_shape])
         boxes.append(_boxes)
-        boxes_scores.append(_box_scores)
+        box_scores.append(_box_scores)
     boxes = K.concatenate(boxes, axis=0)
-    boxes_scores = K.concatenate(box_scores, axis=0)
+    box_scores = K.concatenate(box_scores, axis=0)
 
 
     # 过滤小于score_threshold的目标框
